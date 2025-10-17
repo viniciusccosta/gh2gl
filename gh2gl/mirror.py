@@ -57,10 +57,23 @@ def sanitize_project_name(name):
     return sanitized
 
 
-def mirror_repos(dry_run=False):
+def mirror_repos(dry_run=False, skip_existing=False, force=False):
     if dry_run:
         print("🏃 DRY RUN MODE - No changes will be made")
         print()
+
+    if skip_existing:
+        print("⏭️  SKIP EXISTING MODE - Will skip repositories that already exist")
+        print()
+        
+    if force:
+        print("💪 FORCE MODE - Will overwrite existing GitLab repositories with GitHub content")
+        print()
+        
+    # Validate conflicting options
+    if skip_existing and force:
+        print("❌ Error: Cannot use both --skip-existing and --force at the same time")
+        return
 
     github_user = keyring.get_password("gh2gl", "github_username")
     github_token = keyring.get_password("gh2gl", "github_token")
@@ -100,10 +113,21 @@ def mirror_repos(dry_run=False):
 
     print(f"Found {len(repos)} repositories on GitHub.")
 
+    # Track statistics
+    stats = {
+        "created": 0,
+        "already_existed": 0,
+        "skipped": 0,
+        "forced_update": 0,
+        "errors": 0,
+        "mirrored": 0,
+    }
+
     # --- 2. Create projects on GitLab ---
     for repo in repos:
         # Sanitize the repository name for GitLab
         sanitized_repo_name = sanitize_project_name(repo)
+        repo_was_force_updated = False
 
         print(f"\nProcessing {repo}...")
         if repo != sanitized_repo_name:
@@ -113,7 +137,10 @@ def mirror_repos(dry_run=False):
             print(
                 f"  Would create project '{sanitized_repo_name}' on GitLab at {gitlab_url}"
             )
-            print(f"  Would mirror from GitHub to GitLab")
+            if force:
+                print(f"  Would force update existing GitLab repository with GitHub content")
+            else:
+                print(f"  Would mirror from GitHub to GitLab")
             continue
 
         # Create project on GitLab
@@ -133,30 +160,90 @@ def mirror_repos(dry_run=False):
 
         if r.status_code == 201:
             print(f"Created project {sanitized_repo_name} on GitLab.")
+            stats["created"] += 1
         elif r.status_code == 400:
             try:
                 error_detail = r.json()
                 if (
                     "message" in error_detail
+                    and "path" in error_detail["message"]
+                    and "already been taken" in str(error_detail["message"])
+                ):
+                    # Try with a suffix to avoid path conflicts
+                    attempt = 1
+                    original_name = sanitized_repo_name
+                    while attempt <= 3:
+                        alt_name = f"{original_name}-{attempt}"
+                        alt_data = data.copy()
+                        alt_data["name"] = alt_name
+                        alt_data["path"] = alt_name
+
+                        alt_r = requests.post(
+                            create_url, headers=headers, data=alt_data
+                        )
+                        if alt_r.status_code == 201:
+                            print(
+                                f"Path conflict resolved: created project {alt_name} on GitLab."
+                            )
+                            sanitized_repo_name = alt_name  # Update for git operations
+                            stats["created"] += 1
+                            break
+                        attempt += 1
+                    else:
+                        print(
+                            f"❌ Could not resolve path conflict for {sanitized_repo_name} after 3 attempts."
+                        )
+                        stats["errors"] += 1
+                        continue
+                elif (
+                    "message" in error_detail
                     and "name" in error_detail["message"]
                     and "already been taken" in str(error_detail["message"])
                 ):
                     print(f"Project {sanitized_repo_name} already exists on GitLab.")
+                    stats["already_existed"] += 1
+                    if skip_existing:
+                        print(f"  ⏭️  Skipping {sanitized_repo_name} (already exists)")
+                        stats["skipped"] += 1
+                        continue
+                    elif force:
+                        print(f"  💪 Force updating {sanitized_repo_name} with GitHub content")
+                        stats["forced_update"] += 1
+                        repo_was_force_updated = True
+                        # Continue to git operations to force update
+                    else:
+                        # Default behavior: proceed with mirroring (sync)
+                        pass
                 else:
                     print(
                         f"Error creating project {sanitized_repo_name}: {error_detail}"
                     )
+                    stats["errors"] += 1
                     continue
             except:
                 print(
                     f"Project {sanitized_repo_name} already exists on GitLab (400 response)."
                 )
+                stats["already_existed"] += 1
+                if skip_existing:
+                    print(f"  ⏭️  Skipping {sanitized_repo_name} (already exists)")
+                    stats["skipped"] += 1
+                    continue
+                elif force:
+                    print(f"  💪 Force updating {sanitized_repo_name} with GitHub content")
+                    stats["forced_update"] += 1
+                    repo_was_force_updated = True
+                    # Continue to git operations to force update
+                else:
+                    # Default behavior: proceed with mirroring (sync)
+                    pass
         else:
             print(
                 f"Error creating project {sanitized_repo_name} (Status {r.status_code}): {r.text}"
             )
             print(f"API URL used: {create_url}")
             print(f"Headers: {headers}")
+            stats["errors"] += 1
             continue
 
         # --- 3. Mirror repo from GitHub to GitLab ---
@@ -174,11 +261,59 @@ def mirror_repos(dry_run=False):
 
         # Use a temporary directory name based on the original repo name to avoid conflicts
         temp_dir = f"{repo}_temp_mirror"
-        subprocess.run(["git", "clone", "--mirror", github_clone_url, temp_dir])
+        
+        print(f"  🔄 Cloning {repo} from GitHub...")
+        clone_result = subprocess.run(["git", "clone", "--mirror", github_clone_url, temp_dir], 
+                                      capture_output=True, text=True)
+        
+        if clone_result.returncode != 0:
+            print(f"  ❌ Failed to clone {repo} from GitHub: {clone_result.stderr}")
+            stats["errors"] += 1
+            continue
+            
+        # Set the push URL to GitLab
         subprocess.run(
             ["git", "remote", "set-url", "--push", "origin", gitlab_clone_url],
             cwd=temp_dir,
         )
-        subprocess.run(["git", "push", "--mirror"], cwd=temp_dir)
+        
+        # Push to GitLab
+        push_args = ["git", "push", "--mirror"]
+        if force:
+            # In force mode, we want to ensure we overwrite everything
+            push_args.extend(["--force"])
+            print(f"  💪 Force pushing to GitLab...")
+        else:
+            print(f"  📤 Pushing to GitLab...")
+            
+        push_result = subprocess.run(push_args, cwd=temp_dir, capture_output=True, text=True)
+        
+        if push_result.returncode != 0:
+            print(f"  ❌ Failed to push {repo} to GitLab: {push_result.stderr}")
+            stats["errors"] += 1
+        else:
+            action = "Force updated" if repo_was_force_updated else "Mirrored"
+            print(f"  ✅ {action} {repo} to GitLab as {sanitized_repo_name}.")
+            stats["mirrored"] += 1
+            
+        # Clean up
         subprocess.run(["rm", "-rf", temp_dir])
-        print(f"Mirrored {repo} to GitLab as {sanitized_repo_name}.")
+
+    # --- 4. Print Summary ---
+    print(f"\n🎉 Mirroring Complete!")
+    print(f"📊 Summary:")
+    print(f"  📋 Total repositories: {len(repos)}")
+    print(f"  ✅ Created: {stats['created']}")
+    print(f"  📁 Already existed: {stats['already_existed']}")
+    print(f"  ⏭️  Skipped: {stats['skipped']}")
+    print(f"  � Force updated: {stats['forced_update']}")
+    print(f"  �🔄 Mirrored: {stats['mirrored']}")
+    print(f"  ❌ Errors: {stats['errors']}")
+
+    if stats["errors"] > 0:
+        print(f"\n⚠️  {stats['errors']} repositories had errors and were not mirrored.")
+    if stats["mirrored"] > 0:
+        print(f"\n🔗 Visit your GitLab profile to see the mirrored repositories:")
+        print(f"   {gitlab_url.rstrip('/')}/{gitlab_user}")
+    if stats["forced_update"] > 0:
+        print(f"\n💪 {stats['forced_update']} existing repositories were force updated with latest GitHub content.")

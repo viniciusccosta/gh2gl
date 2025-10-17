@@ -30,12 +30,31 @@ def login_gitlab_cmd():
 def mirror(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would be done without making changes"
-    )
+    ),
+    skip_existing: bool = typer.Option(
+        False, "--skip-existing", help="Skip repositories that already exist on GitLab"
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Force sync existing GitLab repositories with GitHub (overwrite GitLab content)",
+    ),
 ):
     """
     Mirror all GitHub repositories to GitLab.
+
+    By default, this command will:
+    - Create new GitLab projects for GitHub repositories that don't exist
+    - Update existing GitLab repositories with new commits from GitHub
+
+    Options:
+    --dry-run: Preview what would be done without making changes
+    --skip-existing: Skip repositories that already exist on GitLab
+    --force: Force overwrite existing GitLab repositories with GitHub content
+
+    Note: --skip-existing and --force cannot be used together.
     """
-    mirror_repos(dry_run=dry_run)
+    mirror_repos(dry_run=dry_run, skip_existing=skip_existing, force=force)
 
 
 @app.command()
