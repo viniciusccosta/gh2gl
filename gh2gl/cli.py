@@ -27,11 +27,15 @@ def login_gitlab_cmd():
 
 
 @app.command()
-def mirror():
+def mirror(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be done without making changes"
+    )
+):
     """
     Mirror all GitHub repositories to GitLab.
     """
-    mirror_repos()
+    mirror_repos(dry_run=dry_run)
 
 
 @app.command()
