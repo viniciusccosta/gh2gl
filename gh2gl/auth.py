@@ -4,19 +4,44 @@ from typing import Optional, Tuple
 import keyring
 import requests
 import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+# Create Rich console
+console = Console()
 
 
 def login_github():
+    console.print(
+        Panel.fit(
+            "[bold blue]🐙 GitHub Authentication[/bold blue]", border_style="blue"
+        )
+    )
+
     username = typer.prompt("GitHub username")
     token = typer.prompt("GitHub personal access token", hide_input=True)
 
     keyring.set_password("gh2gl", "github_username", username)
     keyring.set_password("gh2gl", "github_token", token)
 
-    typer.echo("GitHub credentials saved securely.")
+    console.print(
+        Panel(
+            "[green]✅ GitHub credentials saved securely.[/green]",
+            title="[bold green]Success[/bold green]",
+            border_style="green",
+        )
+    )
 
 
 def login_gitlab():
+    console.print(
+        Panel.fit(
+            "[bold orange1]🦊 GitLab Authentication[/bold orange1]",
+            border_style="orange1",
+        )
+    )
+
     server_url = typer.prompt("GitLab instance URL", default="https://gitlab.com")
     username = typer.prompt("GitLab username")
     token = typer.prompt("GitLab personal access token", hide_input=True)
@@ -25,7 +50,13 @@ def login_gitlab():
     keyring.set_password("gh2gl", "gitlab_username", username)
     keyring.set_password("gh2gl", "gitlab_token", token)
 
-    typer.echo("GitLab credentials saved securely.")
+    console.print(
+        Panel(
+            "[green]✅ GitLab credentials saved securely.[/green]",
+            title="[bold green]Success[/bold green]",
+            border_style="green",
+        )
+    )
 
 
 def get_github_credentials() -> Tuple[Optional[str], Optional[str]]:
