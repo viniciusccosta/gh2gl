@@ -138,7 +138,7 @@ def mirror_repos(dry_run=False, skip_existing=False, force=False):
         while True:
             status.update(f"[bold green]Fetching page {page} from GitHub API...")
             r = requests.get(
-                f"https://api.github.com/users/{github_user}/repos?per_page=100&page={page}",
+                f"https://api.github.com/user/repos?per_page=100&page={page}&type=all",
                 headers=headers,
             )
 
