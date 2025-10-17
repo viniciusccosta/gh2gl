@@ -1,5 +1,7 @@
 import re
 import subprocess
+import os
+from pathlib import Path
 
 import keyring
 import requests
@@ -12,6 +14,18 @@ from rich.rule import Rule
 
 # Create Rich console
 console = Console()
+
+
+def get_temp_directory():
+    """
+    Create and return a dedicated temporary directory for git operations.
+    
+    Returns:
+        Path: Path to the temp directory
+    """
+    temp_dir = Path.cwd() / ".gh2gl_temp"
+    temp_dir.mkdir(exist_ok=True)
+    return temp_dir
 
 
 def sanitize_project_name(name):
@@ -280,11 +294,12 @@ def mirror_repos(dry_run=False, skip_existing=False, force=False):
                 # For self-hosted GitLab instances
                 gitlab_clone_url = f"https://oauth2:{gitlab_token}@{gitlab_base.replace('https://', '')}/{gitlab_user}/{sanitized_repo_name}.git"
 
-            # Use a temporary directory name based on the original repo name to avoid conflicts
-            temp_dir = f"{repo}_temp_mirror"
+            # Use a dedicated temporary directory within the project
+            temp_base_dir = get_temp_directory()
+            temp_dir = temp_base_dir / f"{repo}_mirror"
             
             console.print(f"  [cyan]🔄 Cloning {repo} from GitHub...[/cyan]")
-            clone_result = subprocess.run(["git", "clone", "--mirror", github_clone_url, temp_dir], 
+            clone_result = subprocess.run(["git", "clone", "--mirror", github_clone_url, str(temp_dir)], 
                                           capture_output=True, text=True)
             
             if clone_result.returncode != 0:
@@ -296,7 +311,7 @@ def mirror_repos(dry_run=False, skip_existing=False, force=False):
             # Set the push URL to GitLab
             subprocess.run(
                 ["git", "remote", "set-url", "--push", "origin", gitlab_clone_url],
-                cwd=temp_dir,
+                cwd=str(temp_dir),
             )
             
             # Push to GitLab
@@ -308,7 +323,7 @@ def mirror_repos(dry_run=False, skip_existing=False, force=False):
             else:
                 console.print(f"  [blue]📤 Pushing to GitLab...[/blue]")
                 
-            push_result = subprocess.run(push_args, cwd=temp_dir, capture_output=True, text=True)
+            push_result = subprocess.run(push_args, cwd=str(temp_dir), capture_output=True, text=True)
             
             if push_result.returncode != 0:
                 console.print(f"  [red]❌ Failed to push {repo} to GitLab: {push_result.stderr}[/red]")
@@ -319,7 +334,7 @@ def mirror_repos(dry_run=False, skip_existing=False, force=False):
                 stats["mirrored"] += 1
                 
             # Clean up
-            subprocess.run(["rm", "-rf", temp_dir])
+            subprocess.run(["rm", "-rf", str(temp_dir)])
             
             # Update progress
             progress.advance(main_task)

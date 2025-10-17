@@ -1,3 +1,6 @@
+# gh2gl specific
+.gh2gl_temp/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
