@@ -165,42 +165,11 @@ def mirror_repos(dry_run=False, skip_existing=False, force=False):
             try:
                 error_detail = r.json()
                 if (
-                    "message" in error_detail
-                    and "path" in error_detail["message"]
-                    and "already been taken" in str(error_detail["message"])
+                    ("message" in error_detail and "path" in error_detail["message"] and "already been taken" in str(error_detail["message"])) or
+                    ("message" in error_detail and "name" in error_detail["message"] and "already been taken" in str(error_detail["message"]))
                 ):
-                    # Try with a suffix to avoid path conflicts
-                    attempt = 1
-                    original_name = sanitized_repo_name
-                    while attempt <= 3:
-                        alt_name = f"{original_name}-{attempt}"
-                        alt_data = data.copy()
-                        alt_data["name"] = alt_name
-                        alt_data["path"] = alt_name
-
-                        alt_r = requests.post(
-                            create_url, headers=headers, data=alt_data
-                        )
-                        if alt_r.status_code == 201:
-                            print(
-                                f"Path conflict resolved: created project {alt_name} on GitLab."
-                            )
-                            sanitized_repo_name = alt_name  # Update for git operations
-                            stats["created"] += 1
-                            break
-                        attempt += 1
-                    else:
-                        print(
-                            f"❌ Could not resolve path conflict for {sanitized_repo_name} after 3 attempts."
-                        )
-                        stats["errors"] += 1
-                        continue
-                elif (
-                    "message" in error_detail
-                    and "name" in error_detail["message"]
-                    and "already been taken" in str(error_detail["message"])
-                ):
-                    print(f"Project {sanitized_repo_name} already exists on GitLab.")
+                    # Both path and name conflicts mean the project already exists
+                    print(f"  Project {sanitized_repo_name} already exists on GitLab.")
                     stats["already_existed"] += 1
                     if skip_existing:
                         print(f"  ⏭️  Skipping {sanitized_repo_name} (already exists)")
@@ -222,7 +191,7 @@ def mirror_repos(dry_run=False, skip_existing=False, force=False):
                     continue
             except:
                 print(
-                    f"Project {sanitized_repo_name} already exists on GitLab (400 response)."
+                    f"  Project {sanitized_repo_name} already exists on GitLab (400 response)."
                 )
                 stats["already_existed"] += 1
                 if skip_existing:
@@ -305,9 +274,9 @@ def mirror_repos(dry_run=False, skip_existing=False, force=False):
     print(f"  📋 Total repositories: {len(repos)}")
     print(f"  ✅ Created: {stats['created']}")
     print(f"  📁 Already existed: {stats['already_existed']}")
-    print(f"  ⏭️  Skipped: {stats['skipped']}")
-    print(f"  � Force updated: {stats['forced_update']}")
-    print(f"  �🔄 Mirrored: {stats['mirrored']}")
+    print(f"  ⏭️ Skipped: {stats['skipped']}")
+    print(f"  💪 Force updated: {stats['forced_update']}")
+    print(f"  ✅ Mirrored: {stats['mirrored']}")
     print(f"  ❌ Errors: {stats['errors']}")
 
     if stats["errors"] > 0:
