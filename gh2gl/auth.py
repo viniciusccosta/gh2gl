@@ -1,5 +1,8 @@
 # gh2gl/auth.py
+from typing import Optional, Tuple
+
 import keyring
+import requests
 import typer
 
 
@@ -23,3 +26,87 @@ def login_gitlab():
     keyring.set_password("gh2gl", "gitlab_token", token)
 
     typer.echo("GitLab credentials saved securely.")
+
+
+def get_github_credentials() -> Tuple[Optional[str], Optional[str]]:
+    """Get GitHub credentials from keyring."""
+    username = keyring.get_password("gh2gl", "github_username")
+    token = keyring.get_password("gh2gl", "github_token")
+    return username, token
+
+
+def get_gitlab_credentials() -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Get GitLab credentials from keyring."""
+    url = keyring.get_password("gh2gl", "gitlab_url")
+    username = keyring.get_password("gh2gl", "gitlab_username")
+    token = keyring.get_password("gh2gl", "gitlab_token")
+    return url, username, token
+
+
+def check_credentials_status() -> dict:
+    """Check if credentials are configured."""
+    github_username, github_token = get_github_credentials()
+    gitlab_url, gitlab_username, gitlab_token = get_gitlab_credentials()
+
+    return {
+        "github": {
+            "username_set": github_username is not None,
+            "token_set": github_token is not None,
+            "username": github_username if github_username else "Not set",
+        },
+        "gitlab": {
+            "url_set": gitlab_url is not None,
+            "username_set": gitlab_username is not None,
+            "token_set": gitlab_token is not None,
+            "url": gitlab_url if gitlab_url else "Not set",
+            "username": gitlab_username if gitlab_username else "Not set",
+        },
+    }
+
+
+def test_github_connection() -> Tuple[bool, str]:
+    """Test GitHub API connection."""
+    username, token = get_github_credentials()
+
+    if not username or not token:
+        return False, "GitHub credentials not configured"
+
+    try:
+        headers = {"Authorization": f"token {token}"}
+        response = requests.get(
+            "https://api.github.com/user", headers=headers, timeout=10
+        )
+
+        if response.status_code == 200:
+            user_data = response.json()
+            return True, f"Connected as {user_data.get('login', username)}"
+        elif response.status_code == 401:
+            return False, "Invalid GitHub token"
+        else:
+            return False, f"GitHub API error: {response.status_code}"
+    except requests.RequestException as e:
+        return False, f"Connection error: {str(e)}"
+
+
+def test_gitlab_connection() -> Tuple[bool, str]:
+    """Test GitLab API connection."""
+    url, username, token = get_gitlab_credentials()
+
+    if not url or not username or not token:
+        return False, "GitLab credentials not configured"
+
+    try:
+        # Remove trailing slash if present
+        base_url = url.rstrip("/")
+        headers = {"Authorization": f"Bearer {token}"}
+        response = requests.get(f"{base_url}/api/v4/user", headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            user_data = response.json()
+            return True, f"Connected as {user_data.get('username', username)}"
+        elif response.status_code == 401:
+            return False, "Invalid GitLab token"
+        else:
+            return False, f"GitLab API error: {response.status_code}"
+    except requests.RequestException as e:
+        return False, f"Connection error: {str(e)}"
